@@ -4,6 +4,13 @@
   "visibility": "public",
   "url": "https://github.com/erh/viam-scales",
   "description": "Modular sensor component: configurable-scale",
+  "models": [
+    {
+      "api": "rdk:component:sensor",
+      "model": "erh:viam-scales:configurable-scale",
+      "markdown_link": "erh_viam-scales_configurable-scale.md"
+    }
+  ],
   "applications": null,
   "markdown_link": "README.md",
   "entrypoint": "bin/viam-scales",
