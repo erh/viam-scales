@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"viamscales"
+
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
+
 	sensor "go.viam.com/rdk/components/sensor"
 )
 
@@ -19,14 +22,19 @@ func realMain() error {
 	ctx := context.Background()
 	logger := logging.NewLogger("cli")
 
-	deps := resource.Dependencies{}
-	// can load these from a remote machine if you need
+	cfg := viamscales.ConfigurableScaleConfig{
+		Sensor: "my-loadcell",
+	}
 
-	cfg := viamscales.Config{}
+	// In real usage, deps would contain the underlying sensor from a Viam robot.
+	deps := resource.Dependencies{
+		// sensor.Named("my-loadcell"): myUnderlyingSensor,
+	}
 
 	thing, err := viamscales.NewConfigurableScale(ctx, deps, sensor.Named("foo"), &cfg, logger)
 	if err != nil {
-		return err
+		fmt.Printf("expected error without real sensor dependency: %v\n", err)
+		return nil
 	}
 	defer thing.Close(ctx)
 
