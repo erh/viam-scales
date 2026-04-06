@@ -9,6 +9,10 @@
       "api": "rdk:component:sensor",
       "model": "erh:viam-scales:configurable-scale",
       "markdown_link": "erh_viam-scales_configurable-scale.md"
+    },
+    {
+      "api": "rdk:component:sensor",
+      "model": "erh:viam-scales:multi-load-cell"
     }
   ],
   "applications": null,
