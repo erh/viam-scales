@@ -72,7 +72,7 @@ func TestReadingsCalibrated(t *testing.T) {
 	cfg := &ConfigurableScaleConfig{
 		Sensor:           "fake",
 		Offset:           1000,
-		CalibrationSlope: 2000, // 2000 raw units per kg
+		CalibrationSlope: 0.0005, // 0.0005 kg per raw unit
 	}
 
 	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, nil, logger)
@@ -89,7 +89,7 @@ func TestReadingsCalibrated(t *testing.T) {
 	if !ok {
 		t.Fatal("weight_kg missing or not float64")
 	}
-	// (5000 - 1000) / 2000 = 2.0 kg
+	// (5000 - 1000) * 0.0005 = 2.0 kg
 	if weightKg != 2.0 {
 		t.Fatalf("expected weight_kg 2.0, got %v", weightKg)
 	}
@@ -166,9 +166,9 @@ func TestCalibrateKg(t *testing.T) {
 	if !ok {
 		t.Fatal("calibration_slope missing or not float64")
 	}
-	// (5000 - 1000) / 2.0 = 2000
-	if slope != 2000.0 {
-		t.Fatalf("expected slope 2000, got %v", slope)
+	// 2.0 / (5000 - 1000) = 0.0005
+	if slope != 0.0005 {
+		t.Fatalf("expected slope 0.0005, got %v", slope)
 	}
 }
 

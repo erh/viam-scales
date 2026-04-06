@@ -9,7 +9,6 @@ import (
 	sensor "go.viam.com/rdk/components/sensor"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
-	rdkutils "go.viam.com/rdk/utils"
 )
 
 var (
@@ -82,7 +81,7 @@ func NewMultiLoadCell(ctx context.Context, deps resource.Dependencies, name reso
 		cells = append(cells, loadCellInfo{
 			sensor:               s,
 			distanceFromCenterMm: entry.DistanceFromCenterMm,
-			directionRadians:   entry.DirectionDegrees * math.Pi / 180.0,
+			directionRadians:     entry.DirectionDegrees * math.Pi / 180.0,
 		})
 	}
 
@@ -180,6 +179,14 @@ func (m *MultiLoadCell) DoCommand(ctx context.Context, cmd map[string]interface{
 	}
 
 	return nil, fmt.Errorf("unknown command, supported commands: tare")
+}
+
+func (m *MultiLoadCell) Status(ctx context.Context) (map[string]interface{}, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return map[string]interface{}{
+		"num_cells": len(m.cells),
+	}, nil
 }
 
 func (m *MultiLoadCell) Close(context.Context) error {

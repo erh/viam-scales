@@ -25,7 +25,7 @@ func (f *fakeCalibratedSensor) Readings(ctx context.Context, extra map[string]in
 	}, nil
 }
 
-func (f *fakeCalibratedSensor) Name() resource.Name        { return f.name }
+func (f *fakeCalibratedSensor) Name() resource.Name         { return f.name }
 func (f *fakeCalibratedSensor) Close(context.Context) error { return nil }
 func (f *fakeCalibratedSensor) Status(ctx context.Context) (map[string]interface{}, error) {
 	return nil, nil
@@ -80,7 +80,7 @@ func TestMultiLoadCellReadingsSum(t *testing.T) {
 		t.Fatal("total_force_N missing")
 	}
 	expectedN := 8.0 * 9.81
-	if totalN != expectedN {
+	if math.Abs(totalN-expectedN) > 0.0001 {
 		t.Fatalf("expected total_force_N %f, got %f", expectedN, totalN)
 	}
 }

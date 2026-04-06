@@ -241,7 +241,7 @@ func (s *ConfigurableScale) DoCommand(ctx context.Context, cmd map[string]interf
 		if err != nil {
 			return nil, fmt.Errorf("calibration failed: %w", err)
 		}
-		s.calibrationSlope = (avg - s.offset) / knownWeight
+		s.calibrationSlope = knownWeight / (avg - s.offset)
 		s.logger.Infof("calibration complete, slope: %f", s.calibrationSlope)
 
 		s.attributes["calibration_slope"] = s.calibrationSlope
