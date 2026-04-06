@@ -106,14 +106,20 @@ func (m *MultiLoadCell) Readings(ctx context.Context, extra map[string]interface
 	vecY := 0.0
 	hasCalibrated := false
 
+	raw := []interface{}{}
+
 	for _, cell := range m.cells {
 		readings, err := cell.sensor.Readings(ctx, extra)
 		if err != nil {
 			return nil, fmt.Errorf("error reading sensor: %w", err)
 		}
 
+		raw = append(raw, readings)
+
 		kg, kgOk := toOptionalFloat64(readings["weight_kg"])
 		n, nOk := toOptionalFloat64(readings["force_N"])
+
+		kg = max(0, kg) // questionable?
 
 		if kgOk {
 			hasCalibrated = true
@@ -132,6 +138,9 @@ func (m *MultiLoadCell) Readings(ctx context.Context, extra map[string]interface
 	}
 
 	result := map[string]interface{}{}
+	if extra != nil && extra["debug"] == true {
+		result["raw"] = raw
+	}
 
 	if hasCalibrated {
 		result["total_weight_kg"] = totalKg
