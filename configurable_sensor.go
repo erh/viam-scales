@@ -46,8 +46,6 @@ type ConfigurableScale struct {
 	logger logging.Logger
 	cfg    *ConfigurableScaleConfig
 
-	cancelFunc func()
-
 	mu               sync.Mutex
 	underlying       sensor.Sensor
 	offset           float64
@@ -63,28 +61,24 @@ func newViamScalesConfigurableScale(ctx context.Context, deps resource.Dependenc
 }
 
 func NewConfigurableScale(ctx context.Context, deps resource.Dependencies, name resource.Name, conf *ConfigurableScaleConfig, logger logging.Logger) (sensor.Sensor, error) {
-	_, cancelFunc := context.WithCancel(context.Background())
 
 	s := &ConfigurableScale{
 		name:             name,
 		logger:           logger,
 		cfg:              conf,
-		cancelFunc:       cancelFunc,
 		offset:           conf.Offset,
 		calibrationSlope: conf.CalibrationSlope,
 	}
 
-	if conf.Sensor != "" {
-		res, err := deps.Lookup(sensor.Named(conf.Sensor))
-		if err != nil {
-			return nil, fmt.Errorf("failed to find underlying sensor %q: %w", conf.Sensor, err)
-		}
-		underlying, ok := res.(sensor.Sensor)
-		if !ok {
-			return nil, fmt.Errorf("resource %q is not a sensor", conf.Sensor)
-		}
-		s.underlying = underlying
+	if conf.Sensor == "" {
+		return nil, fmt.Errorf("no sensor")
 	}
+
+	underlying, err := sensor.FromDependencies(deps, conf.Sensor)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find underlying sensor %q: %w", conf.Sensor, err)
+	}
+	s.underlying = underlying
 
 	return s, nil
 }
@@ -250,6 +244,5 @@ func (s *ConfigurableScale) Status(ctx context.Context) (map[string]interface{},
 }
 
 func (s *ConfigurableScale) Close(context.Context) error {
-	s.cancelFunc()
 	return nil
 }
