@@ -25,9 +25,9 @@ func init() {
 }
 
 type LoadCellEntry struct {
-	Sensor             string  `json:"sensor"`
-	DistanceFromCenter float64 `json:"distance_from_center"`
-	DirectionDegrees   float64 `json:"direction_degrees"`
+	Sensor               string  `json:"sensor"`
+	DistanceFromCenterMm float64 `json:"distance_from_center_mm"`
+	DirectionDegrees     float64 `json:"direction_degrees"`
 }
 
 type MultiLoadCellConfig struct {
@@ -49,9 +49,9 @@ func (cfg *MultiLoadCellConfig) Validate(path string) ([]string, []string, error
 }
 
 type loadCellInfo struct {
-	sensor             sensor.Sensor
-	distanceFromCenter float64
-	directionRadians   float64
+	sensor               sensor.Sensor
+	distanceFromCenterMm float64
+	directionRadians     float64
 }
 
 type MultiLoadCell struct {
@@ -80,8 +80,8 @@ func NewMultiLoadCell(ctx context.Context, deps resource.Dependencies, name reso
 			return nil, fmt.Errorf("failed to find sensor %q: %w", entry.Sensor, err)
 		}
 		cells = append(cells, loadCellInfo{
-			sensor:             s,
-			distanceFromCenter: entry.DistanceFromCenter,
+			sensor:               s,
+			distanceFromCenterMm: entry.DistanceFromCenterMm,
 			directionRadians:   entry.DirectionDegrees * math.Pi / 180.0,
 		})
 	}
@@ -124,9 +124,9 @@ func (m *MultiLoadCell) Readings(ctx context.Context, extra map[string]interface
 			// Use force at this cell's position to compute direction vector.
 			// A cell reading more weight means force is applied near/toward that cell.
 			force := kg
-			if cell.distanceFromCenter > 0 {
-				vecX += force * cell.distanceFromCenter * math.Cos(cell.directionRadians)
-				vecY += force * cell.distanceFromCenter * math.Sin(cell.directionRadians)
+			if cell.distanceFromCenterMm > 0 {
+				vecX += force * cell.distanceFromCenterMm * math.Cos(cell.directionRadians)
+				vecY += force * cell.distanceFromCenterMm * math.Sin(cell.directionRadians)
 			}
 		}
 		_ = nOk

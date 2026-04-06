@@ -52,8 +52,8 @@ func TestMultiLoadCellReadingsSum(t *testing.T) {
 	}
 	cfg := &MultiLoadCellConfig{
 		Sensors: []LoadCellEntry{
-			{Sensor: "s1", DistanceFromCenter: 1.0, DirectionDegrees: 0},
-			{Sensor: "s2", DistanceFromCenter: 1.0, DirectionDegrees: 180},
+			{Sensor: "s1", DistanceFromCenterMm: 1.0, DirectionDegrees: 0},
+			{Sensor: "s2", DistanceFromCenterMm: 1.0, DirectionDegrees: 180},
 		},
 	}
 
@@ -99,8 +99,8 @@ func TestMultiLoadCellForceDirection(t *testing.T) {
 	}
 	cfg := &MultiLoadCellConfig{
 		Sensors: []LoadCellEntry{
-			{Sensor: "s1", DistanceFromCenter: 1.0, DirectionDegrees: 0},
-			{Sensor: "s2", DistanceFromCenter: 1.0, DirectionDegrees: 90},
+			{Sensor: "s1", DistanceFromCenterMm: 1.0, DirectionDegrees: 0},
+			{Sensor: "s2", DistanceFromCenterMm: 1.0, DirectionDegrees: 90},
 		},
 	}
 
@@ -137,8 +137,8 @@ func TestMultiLoadCellEvenForceNoDirection(t *testing.T) {
 	}
 	cfg := &MultiLoadCellConfig{
 		Sensors: []LoadCellEntry{
-			{Sensor: "s1", DistanceFromCenter: 1.0, DirectionDegrees: 0},
-			{Sensor: "s2", DistanceFromCenter: 1.0, DirectionDegrees: 180},
+			{Sensor: "s1", DistanceFromCenterMm: 1.0, DirectionDegrees: 0},
+			{Sensor: "s2", DistanceFromCenterMm: 1.0, DirectionDegrees: 180},
 		},
 	}
 
@@ -175,8 +175,8 @@ func TestMultiLoadCellTare(t *testing.T) {
 	}
 	cfg := &MultiLoadCellConfig{
 		Sensors: []LoadCellEntry{
-			{Sensor: "s1", DistanceFromCenter: 1.0, DirectionDegrees: 0},
-			{Sensor: "s2", DistanceFromCenter: 1.0, DirectionDegrees: 90},
+			{Sensor: "s1", DistanceFromCenterMm: 1.0, DirectionDegrees: 0},
+			{Sensor: "s2", DistanceFromCenterMm: 1.0, DirectionDegrees: 90},
 		},
 	}
 
@@ -212,8 +212,8 @@ func TestMultiLoadCellValidate(t *testing.T) {
 	}
 
 	cfg.Sensors = []LoadCellEntry{
-		{Sensor: "s1", DistanceFromCenter: 1.0, DirectionDegrees: 0},
-		{Sensor: "s2", DistanceFromCenter: 1.0, DirectionDegrees: 90},
+		{Sensor: "s1", DistanceFromCenterMm: 1.0, DirectionDegrees: 0},
+		{Sensor: "s2", DistanceFromCenterMm: 1.0, DirectionDegrees: 90},
 	}
 	deps, _, err := cfg.Validate("test")
 	if err != nil {

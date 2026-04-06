@@ -12,7 +12,8 @@
     },
     {
       "api": "rdk:component:sensor",
-      "model": "erh:viam-scales:multi-load-cell"
+      "model": "erh:viam-scales:multi-load-cell",
+      "markdown_link": "erh_viam-scales_multi-load-cell.md"
     }
   ],
   "applications": null,
