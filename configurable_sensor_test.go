@@ -43,7 +43,7 @@ func TestReadingsRaw(t *testing.T) {
 	}
 	cfg := &ConfigurableScaleConfig{Sensor: "fake"}
 
-	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, logger)
+	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestReadingsCalibrated(t *testing.T) {
 		CalibrationSlope: 2000, // 2000 raw units per kg
 	}
 
-	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, logger)
+	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestTare(t *testing.T) {
 	}
 	cfg := &ConfigurableScaleConfig{Sensor: "fake", TareSamples: 5}
 
-	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, logger)
+	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestCalibrateKg(t *testing.T) {
 	}
 	cfg := &ConfigurableScaleConfig{Sensor: "fake", TareSamples: 5}
 
-	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, logger)
+	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestGetCalibration(t *testing.T) {
 		CalibrationSlope: 200,
 	}
 
-	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, logger)
+	s, err := NewConfigurableScale(ctx, deps, sensor.Named("test-scale"), cfg, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

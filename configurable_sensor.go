@@ -7,9 +7,13 @@ import (
 	"sort"
 	"sync"
 
+	"os"
+
+	"go.viam.com/rdk/app"
 	sensor "go.viam.com/rdk/components/sensor"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
+	rdkutils "go.viam.com/rdk/utils"
 )
 
 var (
@@ -42,9 +46,10 @@ func (cfg *ConfigurableScaleConfig) Validate(path string) ([]string, []string, e
 type ConfigurableScale struct {
 	resource.AlwaysRebuild
 
-	name   resource.Name
-	logger logging.Logger
-	cfg    *ConfigurableScaleConfig
+	name       resource.Name
+	logger     logging.Logger
+	cfg        *ConfigurableScaleConfig
+	attributes rdkutils.AttributeMap
 
 	mu               sync.Mutex
 	underlying       sensor.Sensor
@@ -57,15 +62,20 @@ func newViamScalesConfigurableScale(ctx context.Context, deps resource.Dependenc
 	if err != nil {
 		return nil, err
 	}
-	return NewConfigurableScale(ctx, deps, rawConf.ResourceName(), conf, logger)
+	return NewConfigurableScale(ctx, deps, rawConf.ResourceName(), conf, rawConf.Attributes, logger)
 }
 
-func NewConfigurableScale(ctx context.Context, deps resource.Dependencies, name resource.Name, conf *ConfigurableScaleConfig, logger logging.Logger) (sensor.Sensor, error) {
+func NewConfigurableScale(ctx context.Context, deps resource.Dependencies, name resource.Name, conf *ConfigurableScaleConfig, attributes rdkutils.AttributeMap, logger logging.Logger) (sensor.Sensor, error) {
+
+	if attributes == nil {
+		attributes = rdkutils.AttributeMap{}
+	}
 
 	s := &ConfigurableScale{
 		name:             name,
 		logger:           logger,
 		cfg:              conf,
+		attributes:       attributes,
 		offset:           conf.Offset,
 		calibrationSlope: conf.CalibrationSlope,
 	}
@@ -79,6 +89,12 @@ func NewConfigurableScale(ctx context.Context, deps resource.Dependencies, name 
 		return nil, fmt.Errorf("failed to find underlying sensor %q: %w", conf.Sensor, err)
 	}
 	s.underlying = underlying
+
+	if conf.Offset == 0 {
+		if err := s.tare(ctx); err != nil {
+			return nil, err
+		}
+	}
 
 	return s, nil
 }
@@ -160,6 +176,20 @@ func (s *ConfigurableScale) readAverage(ctx context.Context, n int) (float64, er
 	return sum / float64(len(trimmed)), nil
 }
 
+func (s *ConfigurableScale) tare(ctx context.Context) error {
+	n := s.cfg.TareSamples
+	if n <= 0 {
+		n = 15
+	}
+	avg, err := s.readAverage(ctx, n)
+	if err != nil {
+		return fmt.Errorf("tare failed: %w", err)
+	}
+	s.offset = avg
+	s.logger.Infof("tare complete, offset: %f", s.offset)
+	return nil
+}
+
 func (s *ConfigurableScale) Readings(ctx context.Context, extra map[string]interface{}) (map[string]interface{}, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -189,16 +219,9 @@ func (s *ConfigurableScale) DoCommand(ctx context.Context, cmd map[string]interf
 	defer s.mu.Unlock()
 
 	if _, ok := cmd["tare"]; ok {
-		n := s.cfg.TareSamples
-		if n <= 0 {
-			n = 15
+		if err := s.tare(ctx); err != nil {
+			return nil, err
 		}
-		avg, err := s.readAverage(ctx, n)
-		if err != nil {
-			return nil, fmt.Errorf("tare failed: %w", err)
-		}
-		s.offset = avg
-		s.logger.Infof("tare complete, offset: %f", s.offset)
 		return map[string]interface{}{
 			"offset": s.offset,
 		}, nil
@@ -219,6 +242,12 @@ func (s *ConfigurableScale) DoCommand(ctx context.Context, cmd map[string]interf
 		}
 		s.calibrationSlope = (avg - s.offset) / knownWeight
 		s.logger.Infof("calibration complete, slope: %f", s.calibrationSlope)
+
+		s.attributes["calibration_slope"] = s.calibrationSlope
+		if err := s.saveToCloudConfig(ctx); err != nil {
+			s.logger.Warnf("failed to save calibration to cloud config: %v", err)
+		}
+
 		return map[string]interface{}{
 			"calibration_slope": s.calibrationSlope,
 		}, nil
@@ -241,6 +270,46 @@ func (s *ConfigurableScale) Status(ctx context.Context) (map[string]interface{},
 		"offset":            s.offset,
 		"calibration_slope": s.calibrationSlope,
 	}, nil
+}
+
+func (s *ConfigurableScale) saveToCloudConfig(ctx context.Context) error {
+	partID := os.Getenv(rdkutils.MachinePartIDEnvVar)
+	if partID == "" {
+		return fmt.Errorf("no %s in env", rdkutils.MachinePartIDEnvVar)
+	}
+
+	client, err := app.CreateViamClientFromEnvVars(ctx, nil, s.logger)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	appClient := client.AppClient()
+
+	part, _, err := appClient.GetRobotPart(ctx, partID)
+	if err != nil {
+		return err
+	}
+
+	cfg := part.RobotConfig
+	components, ok := cfg["components"].([]interface{})
+	if !ok {
+		return fmt.Errorf("no components in config")
+	}
+
+	for _, c := range components {
+		comp, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if comp["name"] == s.name.ShortName() {
+			comp["attributes"] = s.attributes
+			break
+		}
+	}
+
+	_, err = appClient.UpdateRobotPart(ctx, partID, part.Name, cfg)
+	return err
 }
 
 func (s *ConfigurableScale) Close(context.Context) error {

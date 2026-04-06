@@ -31,7 +31,7 @@ func realMain() error {
 		// sensor.Named("my-loadcell"): myUnderlyingSensor,
 	}
 
-	thing, err := viamscales.NewConfigurableScale(ctx, deps, sensor.Named("foo"), &cfg, logger)
+	thing, err := viamscales.NewConfigurableScale(ctx, deps, sensor.Named("foo"), &cfg, nil, logger)
 	if err != nil {
 		fmt.Printf("expected error without real sensor dependency: %v\n", err)
 		return nil
