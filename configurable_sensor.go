@@ -202,11 +202,12 @@ func (s *ConfigurableScale) Readings(ctx context.Context, extra map[string]inter
 	adjusted := raw - s.offset
 
 	result := map[string]interface{}{
-		"raw_value": raw,
+		"raw_value":      raw,
+		"adjusted_value": adjusted,
 	}
 
 	if s.calibrationSlope != 0 {
-		weightKg := adjusted / s.calibrationSlope
+		weightKg := adjusted * s.calibrationSlope
 		result["weight_kg"] = weightKg
 		result["force_N"] = weightKg * 9.81
 	}
