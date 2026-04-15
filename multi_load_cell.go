@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	sensor "go.viam.com/rdk/components/sensor"
 	"go.viam.com/rdk/logging"
@@ -13,6 +14,16 @@ import (
 
 var (
 	MultiLoadCellModel = resource.NewModel("erh", "viam-scales", "multi-load-cell")
+)
+
+// Background polling constants.
+const (
+	// loadCellPollInterval targets 50Hz. Goroutines read as fast as the
+	// underlying sensor allows, up to this cap.
+	loadCellPollInterval = 20 * time.Millisecond
+	// loadCellMaxAge is how stale a cached reading may be before Readings
+	// returns an error.
+	loadCellMaxAge = 500 * time.Millisecond
 )
 
 func init() {
@@ -49,8 +60,61 @@ func (cfg *MultiLoadCellConfig) Validate(path string) ([]string, []string, error
 
 type loadCellInfo struct {
 	sensor               sensor.Sensor
+	sensorName           string
 	distanceFromCenterMm float64
 	directionRadians     float64
+
+	mu             sync.Mutex
+	latestReadings map[string]interface{}
+	latestErr      error
+	latestTime     time.Time
+}
+
+// readOnce reads the underlying sensor once and updates the cache.
+// On success, latestReadings and latestTime are updated. On error, latestErr
+// is set but the previous latestReadings and latestTime remain so transient
+// errors don't immediately invalidate fresh data; the staleness check in
+// Readings is the source of truth.
+func (c *loadCellInfo) readOnce(ctx context.Context) {
+	readings, err := c.sensor.Readings(ctx, nil)
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err != nil {
+		c.latestErr = err
+		return
+	}
+	c.latestReadings = readings
+	c.latestErr = nil
+	c.latestTime = now
+}
+
+// latest returns the most recent cached reading along with the time it was
+// taken. If no successful read has happened yet, the last error is returned.
+func (c *loadCellInfo) latest() (map[string]interface{}, time.Time, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.latestReadings == nil {
+		if c.latestErr != nil {
+			return nil, time.Time{}, c.latestErr
+		}
+		return nil, time.Time{}, fmt.Errorf("no reading available yet for sensor %q", c.sensorName)
+	}
+	return c.latestReadings, c.latestTime, nil
+}
+
+func (c *loadCellInfo) poll(ctx context.Context, logger logging.Logger) {
+	ticker := time.NewTicker(loadCellPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.readOnce(ctx)
+		}
+	}
 }
 
 type MultiLoadCell struct {
@@ -59,8 +123,11 @@ type MultiLoadCell struct {
 	name   resource.Name
 	logger logging.Logger
 
-	mu    sync.Mutex
-	cells []loadCellInfo
+	mu sync.Mutex
+
+	cells    []*loadCellInfo
+	cancelFn context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 func newMultiLoadCell(ctx context.Context, deps resource.Dependencies, rawConf resource.Config, logger logging.Logger) (sensor.Sensor, error) {
@@ -72,24 +139,45 @@ func newMultiLoadCell(ctx context.Context, deps resource.Dependencies, rawConf r
 }
 
 func NewMultiLoadCell(ctx context.Context, deps resource.Dependencies, name resource.Name, conf *MultiLoadCellConfig, logger logging.Logger) (sensor.Sensor, error) {
-	cells := make([]loadCellInfo, 0, len(conf.Sensors))
+	cells := make([]*loadCellInfo, 0, len(conf.Sensors))
 	for _, entry := range conf.Sensors {
 		s, err := sensor.FromDependencies(deps, entry.Sensor)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find sensor %q: %w", entry.Sensor, err)
 		}
-		cells = append(cells, loadCellInfo{
+		cells = append(cells, &loadCellInfo{
 			sensor:               s,
+			sensorName:           entry.Sensor,
 			distanceFromCenterMm: entry.DistanceFromCenterMm,
 			directionRadians:     entry.DirectionDegrees * math.Pi / 180.0,
 		})
 	}
 
-	return &MultiLoadCell{
-		name:   name,
-		logger: logger,
-		cells:  cells,
-	}, nil
+	// Prime the cache synchronously so a call to Readings() immediately after
+	// construction has data to work with.
+	for _, cell := range cells {
+		cell.readOnce(ctx)
+	}
+
+	pollCtx, cancel := context.WithCancel(context.Background())
+
+	m := &MultiLoadCell{
+		name:     name,
+		logger:   logger,
+		cells:    cells,
+		cancelFn: cancel,
+	}
+
+	for _, cell := range cells {
+		c := cell
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			c.poll(pollCtx, logger)
+		}()
+	}
+
+	return m, nil
 }
 
 func (m *MultiLoadCell) Name() resource.Name {
@@ -97,9 +185,6 @@ func (m *MultiLoadCell) Name() resource.Name {
 }
 
 func (m *MultiLoadCell) Readings(ctx context.Context, extra map[string]interface{}) (map[string]interface{}, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	totalKg := 0.0
 	totalN := 0.0
 	vecX := 0.0
@@ -108,10 +193,16 @@ func (m *MultiLoadCell) Readings(ctx context.Context, extra map[string]interface
 
 	raw := []interface{}{}
 
+	now := time.Now()
+
 	for _, cell := range m.cells {
-		readings, err := cell.sensor.Readings(ctx, extra)
+		readings, lastRead, err := cell.latest()
 		if err != nil {
-			return nil, fmt.Errorf("error reading sensor: %w", err)
+			return nil, fmt.Errorf("error reading sensor %q: %w", cell.sensorName, err)
+		}
+		age := now.Sub(lastRead)
+		if age > loadCellMaxAge {
+			return nil, fmt.Errorf("latest reading for sensor %q is too stale (age %v > %v)", cell.sensorName, age, loadCellMaxAge)
 		}
 
 		raw = append(raw, readings)
@@ -199,5 +290,9 @@ func (m *MultiLoadCell) Status(ctx context.Context) (map[string]interface{}, err
 }
 
 func (m *MultiLoadCell) Close(context.Context) error {
+	if m.cancelFn != nil {
+		m.cancelFn()
+	}
+	m.wg.Wait()
 	return nil
 }

@@ -2,8 +2,12 @@ package viamscales
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	sensor "go.viam.com/rdk/components/sensor"
 	"go.viam.com/rdk/logging"
@@ -15,10 +19,25 @@ type fakeCalibratedSensor struct {
 	name     resource.Name
 	weightKg float64
 	forceN   float64
-	tared    bool
+
+	mu     sync.Mutex
+	tared  bool
+	broken bool
+}
+
+func (f *fakeCalibratedSensor) setBroken(b bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.broken = b
 }
 
 func (f *fakeCalibratedSensor) Readings(ctx context.Context, extra map[string]interface{}) (map[string]interface{}, error) {
+	f.mu.Lock()
+	broken := f.broken
+	f.mu.Unlock()
+	if broken {
+		return nil, fmt.Errorf("sensor is broken")
+	}
 	return map[string]interface{}{
 		"weight_kg": f.weightKg,
 		"force_N":   f.forceN,
@@ -33,10 +52,18 @@ func (f *fakeCalibratedSensor) Status(ctx context.Context) (map[string]interface
 
 func (f *fakeCalibratedSensor) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
 	if _, ok := cmd["tare"]; ok {
+		f.mu.Lock()
 		f.tared = true
+		f.mu.Unlock()
 		return map[string]interface{}{"offset": 0.0}, nil
 	}
 	return nil, nil
+}
+
+func (f *fakeCalibratedSensor) wasTared() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tared
 }
 
 func TestMultiLoadCellReadingsSum(t *testing.T) {
@@ -61,6 +88,7 @@ func TestMultiLoadCellReadingsSum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer m.Close(ctx)
 
 	readings, err := m.Readings(ctx, nil)
 	if err != nil {
@@ -108,6 +136,7 @@ func TestMultiLoadCellForceDirection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer m.Close(ctx)
 
 	readings, err := m.Readings(ctx, nil)
 	if err != nil {
@@ -146,6 +175,7 @@ func TestMultiLoadCellEvenForceNoDirection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer m.Close(ctx)
 
 	readings, err := m.Readings(ctx, nil)
 	if err != nil {
@@ -184,17 +214,112 @@ func TestMultiLoadCellTare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer m.Close(ctx)
 
 	_, err = m.DoCommand(ctx, map[string]interface{}{"tare": true})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !s1.tared {
+	if !s1.wasTared() {
 		t.Fatal("expected s1 to be tared")
 	}
-	if !s2.tared {
+	if !s2.wasTared() {
 		t.Fatal("expected s2 to be tared")
+	}
+}
+
+func TestMultiLoadCellStaleReading(t *testing.T) {
+	ctx := context.Background()
+	logger := logging.NewLogger("test")
+
+	s1 := &fakeCalibratedSensor{name: sensor.Named("s1"), weightKg: 3.0, forceN: 3.0 * 9.81}
+	s2 := &fakeCalibratedSensor{name: sensor.Named("s2"), weightKg: 5.0, forceN: 5.0 * 9.81}
+
+	deps := resource.Dependencies{
+		sensor.Named("s1"): s1,
+		sensor.Named("s2"): s2,
+	}
+	cfg := &MultiLoadCellConfig{
+		Sensors: []LoadCellEntry{
+			{Sensor: "s1", DistanceFromCenterMm: 1.0, DirectionDegrees: 0},
+			{Sensor: "s2", DistanceFromCenterMm: 1.0, DirectionDegrees: 180},
+		},
+	}
+
+	m, err := NewMultiLoadCell(ctx, deps, sensor.Named("multi"), cfg, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(ctx)
+
+	// Initially readings work fine.
+	if _, err := m.Readings(ctx, nil); err != nil {
+		t.Fatalf("expected fresh readings, got err: %v", err)
+	}
+
+	// Break s2 so its cache stops advancing.
+	s2.setBroken(true)
+
+	// Wait long enough for s2's cached reading to exceed loadCellMaxAge.
+	time.Sleep(loadCellMaxAge + 100*time.Millisecond)
+
+	_, err = m.Readings(ctx, nil)
+	if err == nil {
+		t.Fatal("expected stale-reading error, got nil")
+	}
+	if !strings.Contains(err.Error(), "too stale") {
+		t.Fatalf("expected stale error, got: %v", err)
+	}
+
+	// Recover the sensor; the next poll should refresh the cache and Readings succeeds again.
+	s2.setBroken(false)
+	time.Sleep(loadCellPollInterval * 3)
+
+	if _, err := m.Readings(ctx, nil); err != nil {
+		t.Fatalf("expected readings to recover after sensor unblocked, got err: %v", err)
+	}
+}
+
+func TestMultiLoadCellBackgroundPolling(t *testing.T) {
+	ctx := context.Background()
+	logger := logging.NewLogger("test")
+
+	s1 := &fakeCalibratedSensor{name: sensor.Named("s1"), weightKg: 1.0, forceN: 9.81}
+
+	deps := resource.Dependencies{
+		sensor.Named("s1"): s1,
+	}
+	cfg := &MultiLoadCellConfig{
+		Sensors: []LoadCellEntry{
+			{Sensor: "s1", DistanceFromCenterMm: 1.0, DirectionDegrees: 0},
+		},
+	}
+
+	m, err := NewMultiLoadCell(ctx, deps, sensor.Named("multi"), cfg, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close(ctx)
+
+	// Cast to concrete type to inspect cache timestamps directly.
+	mlc := m.(*MultiLoadCell)
+
+	_, firstTime, err := mlc.cells[0].latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait enough for multiple poll ticks.
+	time.Sleep(loadCellPollInterval * 5)
+
+	_, secondTime, err := mlc.cells[0].latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !secondTime.After(firstTime) {
+		t.Fatalf("expected background poll to refresh latestTime; first=%v second=%v", firstTime, secondTime)
 	}
 }
 
